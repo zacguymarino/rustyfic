@@ -177,7 +177,25 @@ fn main() -> io::Result<()> {
                         engine::render_room(&mut out, room, &flags, &world, &item_locations);
                     }
 
-                } else if engine::try_handle_action(&mut out, current_room, input, &mut flags) {
+                } else if engine::try_handle_action(
+                    &mut out,
+                    current_room,
+                    input,
+                    &world,
+                    &item_locations,
+                    &current_room_id,
+                    &mut flags,
+                ) {
+                    // handled
+
+                } else if engine::try_handle_global_action(
+                    &mut out,
+                    input,
+                    &world,
+                    &item_locations,
+                    &current_room_id,
+                    &mut flags,
+                ) {
                     // handled
 
                 } else {

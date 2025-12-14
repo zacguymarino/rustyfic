@@ -17,6 +17,7 @@ pub struct World {
     pub rooms: HashMap<String, Room>,
     pub items: HashMap<String, Item>,
     pub global_conditions: Vec<GlobalCondition>,
+    pub global_actions: Vec<Action>,
 }
 
 pub struct Room {
@@ -47,6 +48,8 @@ pub struct Action {
     pub response: String,
     pub effects: Vec<String>,
     pub conditions: Vec<String>,
+    pub scope_requirements: Vec<String>,
+    pub requires_inventory: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -110,6 +113,8 @@ struct WorldFile {
     item: Vec<ItemConfig>, // [[item]] blocks
     #[serde(default)]
     global_condition: Vec<GlobalConditionConfig>, // [[global_condition]]
+    #[serde(default)]
+    global_action: Vec<ActionConfig>,  // [[global_action]]
 }
 
 #[derive(Deserialize)]
@@ -170,6 +175,12 @@ struct ActionConfig {
 
     #[serde(default)]
     conditions: Vec<String>,
+
+    #[serde(default)]
+    scope_requirements: Vec<String>,
+
+    #[serde(default)]
+    requires_inventory: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -305,9 +316,11 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
                 id: a.id,
                 verbs: a.verbs,
                 nouns: a.nouns,
-                response: a.response,
+                response: normalize_multiline_desc(&a.response),
                 effects: a.effects,
                 conditions: a.conditions,
+                scope_requirements: a.scope_requirements,
+                requires_inventory: a.requires_inventory,
             })
             .collect();
 
@@ -411,6 +424,22 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
         });
     }
 
+    // Build global actions
+    let global_actions: Vec<Action> = world_file
+    .global_action
+    .into_iter()
+    .map(|a| Action {
+        id: a.id,
+        verbs: a.verbs,
+        nouns: a.nouns,
+        response: normalize_multiline_desc(&a.response),
+        effects: a.effects,
+        conditions: a.conditions,
+        scope_requirements: a.scope_requirements,
+        requires_inventory: a.requires_inventory,
+    })
+    .collect();
+
     Ok(World {
         id: world_file.world.id,
         name: world_file.world.name,
@@ -419,6 +448,7 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
         rooms: rooms_map,
         items: items_map,
         global_conditions,
+        global_actions,
     })
 }
 
