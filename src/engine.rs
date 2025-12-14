@@ -872,7 +872,7 @@ pub fn handle_take_all_from_container(
     container_name: &str,
     flags: &HashSet<String>,
 ) {
-    use world::{ItemKind, ItemLocation, ContainerProps};
+    use world::{ItemKind, ItemLocation};
 
     let container_query = container_name.trim().to_lowercase();
     if container_query.is_empty() {
@@ -880,50 +880,51 @@ pub fn handle_take_all_from_container(
         return;
     }
 
-    // 1) Find the container in the room or inventory
-    let mut container_candidate: Option<(&world::Item, &ContainerProps)> = None;
+    // 1) Find the container (room or inventory), using scored matching
+    let container_match = find_item_by_words_scored(
+        world,
+        item_locations,
+        &HashSet::new(),
+        &container_query,
+        |candidate, loc| {
+            let in_scope = match loc {
+                ItemLocation::Room(room_id) => room_id == current_room_id,
+                ItemLocation::Inventory => true,
+                _ => false,
+            };
 
-    for it in world.items.values() {
-        let loc = match item_locations.get(&it.id) {
-            Some(l) => l,
-            None => continue,
-        };
+            if !in_scope {
+                return false;
+            }
 
-        let here = match loc {
-            ItemLocation::Room(room_id) if room_id == current_room_id => true,
-            ItemLocation::Inventory => true,
-            _ => false,
-        };
+            matches!(candidate.kind, ItemKind::Container(_))
+        },
+    );
 
-        if !here {
-            continue;
-        }
-
-        if !it.name.to_lowercase().contains(&container_query) {
-            continue;
-        }
-
-        if let ItemKind::Container(ref props) = it.kind {
-            container_candidate = Some((it, props));
-            break;
-        }
-    }
-
-    let (container, props) = match container_candidate {
-        Some(c) => c,
-        None => {
+    let container = match container_match {
+        ItemMatch::None => {
             out.say("You don't see any container like that here.");
             return;
         }
+        ItemMatch::Many(_) => {
+            out.say("Be more specific about which container.");
+            return;
+        }
+        ItemMatch::One(c) => c,
+    };
+
+    let props = match &container.kind {
+        ItemKind::Container(p) => p,
+        _ => unreachable!(),
     };
 
     // 2) Check container interaction conditions (open/closed)
     if !props.conditions.is_empty() && !conditions_met(&props.conditions, flags) {
-        out.say(format!("{}", props.closed_text.trim()));
+        out.say(props.closed_text.trim());
         return;
     }
 
-    // 3) Collect all items we can take from inside
+    // 3) Collect all portable, visible items inside the container
     let mut to_take: Vec<String> = Vec::new();
 
     for item in world.items.values() {
@@ -954,7 +955,11 @@ pub fn handle_take_all_from_container(
     for item_id in &to_take {
         if let Some(item) = world.items.get(item_id) {
             item_locations.insert(item_id.clone(), ItemLocation::Inventory);
-            out.say(format!("You take the {} from the {}.", item.name, container.name));
+            out.say(format!(
+                "You take the {} from the {}.",
+                item.name,
+                container.name
+            ));
         }
     }
 }

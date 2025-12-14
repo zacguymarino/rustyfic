@@ -1,0 +1,325 @@
+Rustyfic Interactive Fiction DSL
+================================
+
+This document describes the current domain-specific language (DSL) used by the
+Rustyfic interactive fiction engine. The DSL is expressed using TOML files and
+is designed to define complete text adventure games, including world structure,
+rooms, items, actions, containers, and global state-driven logic.
+
+All sections below describe currently implemented and supported features.
+
+
+------------------------------------------------------------
+[world]
+------------------------------------------------------------
+
+Defines global metadata and entry point for a game.
+
+Required fields:
+- id (string)
+  A unique identifier for the world.
+
+- name (string)
+  Display name of the game.
+
+- start_room (string)
+  ID of the room where play begins.
+
+Optional fields:
+- desc (multiline string)
+  Introductory text shown once when the game starts.
+
+Example:
+[world]
+id = "domus"
+name = "Domus"
+start_room = "field"
+desc = """
+You are on planet Domus.
+"""
+
+
+------------------------------------------------------------
+[[room]]
+------------------------------------------------------------
+
+Defines a single location the player may occupy.
+
+Required fields:
+- id (string)
+  Unique room identifier.
+
+- name (string)
+  Room title shown when entering or looking.
+
+- desc (multiline string)
+  Base room description. This should describe the environment itself and should
+  NOT explicitly list items or containers, which are described separately.
+
+Optional nested blocks:
+- [[room.exit]]
+- [[room.action]]
+- [[room.state_desc]]
+
+Example:
+[[room]]
+id = "field"
+name = "Field"
+desc = """
+You stand in a vast open field.
+"""
+
+
+------------------------------------------------------------
+[[room.exit]]
+------------------------------------------------------------
+
+Defines a directional exit from a room.
+
+Required fields:
+- direction (string)
+  Canonical direction name (e.g. "north", "south", "west").
+
+- target (string)
+  ID of the room this exit leads to.
+
+Optional fields:
+- verbs (array of strings)
+  Accepted words or abbreviations for this exit.
+  Common examples include "north", "n", etc.
+
+- conditions (array of strings)
+  Flags that must be present (or absent, using !flag) for the exit to be usable.
+
+Movement parsing rules:
+- Any full word matching the exit direction or verbs will trigger movement.
+- A single-letter word matching the first letter of a direction also works.
+- Partial-word matches inside longer words do not count.
+
+Example:
+[[room.exit]]
+direction = "north"
+target = "forest"
+verbs = ["north", "n"]
+
+
+------------------------------------------------------------
+[[room.action]]
+------------------------------------------------------------
+
+Defines a custom verb-driven interaction available in a room.
+
+Required fields:
+- id (string)
+  Unique identifier for the action.
+
+- verbs (array of strings)
+  Accepted verbs that trigger this action.
+
+Required fields (one of):
+- response (string or multiline string)
+  Text printed when the action succeeds.
+
+Optional fields:
+- nouns (array of strings)
+  Required noun(s) for the action. If omitted, no noun is required.
+
+- conditions (array of strings)
+  Flags that must be present (or absent) for the action to be available.
+
+- effects (array of strings)
+  Flags to add or remove when the action succeeds.
+  Prefix with "!" to remove a flag.
+
+Example:
+[[room.action]]
+id = "open_trapdoor"
+verbs = ["open", "lift"]
+nouns = ["trapdoor"]
+conditions = ["rug_moved", "!trapdoor_open"]
+response = "You open the trapdoor."
+effects = ["trapdoor_open"]
+
+
+------------------------------------------------------------
+[[room.state_desc]]
+------------------------------------------------------------
+
+Adds conditional text to a room description.
+
+This text is appended to the base room description only when its conditions are met.
+
+Required fields:
+- conditions (array of strings)
+  Flags that must be present (or absent).
+
+- text (multiline string)
+  Description text to append.
+
+Example:
+[[room.state_desc]]
+conditions = ["trapdoor_open"]
+text = """
+A dark opening yawns in the floor.
+"""
+
+
+------------------------------------------------------------
+[[global_condition]]
+------------------------------------------------------------
+
+Defines a rule that triggers automatically when its conditions are met.
+
+Global conditions are evaluated once per turn, after player actions, and may
+modify flags and print output.
+
+Required fields:
+- id (string)
+  Unique identifier.
+
+- conditions (array of strings)
+  Conditions required to trigger.
+
+- response (string or multiline string)
+  Text printed when the condition fires.
+
+Optional fields:
+- effects (array of strings)
+  Flags to add or remove when triggered.
+
+- one_shot (boolean)
+  If true, the condition fires only once.
+
+- allowed_rooms (array of strings)
+  If provided, condition only fires while in these rooms.
+
+- disallowed_rooms (array of strings)
+  Rooms where the condition will not fire.
+
+Example:
+[[global_condition]]
+id = "dark_bar_notice"
+conditions = ["!bar_lit"]
+allowed_rooms = ["bar"]
+one_shot = true
+response = """
+You feel uneasy in the darkness.
+"""
+
+
+------------------------------------------------------------
+[[item]]
+------------------------------------------------------------
+
+Defines a physical object in the game.
+
+Required fields:
+- id (string)
+  Unique item identifier.
+
+- name (string)
+  Display name.
+
+- start_location (string)
+  Initial location:
+    "room:<room_id>"
+    "inventory"
+    "item:<container_id>"
+
+Optional fields:
+- portable (boolean, default true)
+  Whether the item can be carried.
+
+- conditions (array of strings)
+  Flags required for the item to be visible or interactable.
+
+- room_text (multiline string)
+  Description shown when the item is visible in a room.
+
+- inventory_text (string)
+  Text shown in inventory listings.
+
+- examine_text (multiline string)
+  Text shown when examining the item.
+
+- kind (string)
+  Either omitted (simple item) or set to "container".
+
+Example:
+[[item]]
+id = "rusty_sword"
+name = "rusty sword"
+start_location = "room:field"
+
+
+------------------------------------------------------------
+Item Kind: Simple (default)
+------------------------------------------------------------
+
+A basic item with no special behavior beyond being examined, taken, dropped,
+or carried.
+
+
+------------------------------------------------------------
+Item Kind: Container
+------------------------------------------------------------
+
+A container item may hold other items and supports verb-based interactions.
+
+Additional fields for containers:
+- kind = "container"
+
+- capacity (integer, optional)
+  Maximum number of items allowed inside.
+
+- verbs (array of strings)
+  Verbs that may be used to place items into this container.
+  Examples: ["put", "hang", "place"]
+
+- prep (string)
+  Preposition used when printing action responses.
+  Examples: "in", "on", "onto"
+
+- container_conditions (array of strings)
+  Conditions required to interact with the container.
+
+- container_closed_text (string)
+  Message shown if interaction is blocked by conditions.
+
+Optional completion logic:
+- complete_when (array of item IDs)
+  Items that must all be inside the container.
+
+- complete_flag (string)
+  Flag set when completion occurs.
+
+- complete_text (multiline string)
+  Text printed when completion is achieved.
+
+Example:
+[[item]]
+id = "brass_hook"
+name = "small brass hook"
+kind = "container"
+capacity = 1
+verbs = ["hang"]
+prep = "on"
+complete_when = ["velvet_cloak"]
+complete_flag = "bar_lit"
+complete_text = """
+As you hang the cloak, the darkness lifts.
+"""
+
+
+------------------------------------------------------------
+General Notes
+------------------------------------------------------------
+
+- All condition arrays support negation via "!flag".
+- Matching is based on full words, not substrings.
+- Item disambiguation is resolved by scoring word overlap.
+- Output ordering ensures that important events (like global conditions)
+  appear distinctly and clearly.
+
+This document reflects the current implemented feature set of Rustyfic.
+Future features should extend this documentation incrementally.
