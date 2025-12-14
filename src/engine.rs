@@ -2,12 +2,17 @@ use std::collections::{HashMap, HashSet};
 
 use crate::world;
 
+#[derive(Debug, Clone)]
+pub enum OutputBlock {
+    Title(String),
+    Text(String),
+    Event(String),
+    Exits(String),
+}
+
 #[derive(Default, Debug)]
 pub struct Output {
-    pub title: Option<String>,
-    pub body: Vec<String>,     // room description, normal prose
-    pub events: Vec<String>,    // global conditions, major events
-    pub exits: Option<String>,
+    pub blocks: Vec<OutputBlock>,
 }
 
 impl Output {
@@ -15,26 +20,36 @@ impl Output {
         Self::default()
     }
 
-    pub fn set_title(&mut self, s: impl Into<String>) {
-        self.title = Some(s.into());
+    pub fn title(&mut self, s: impl Into<String>) {
+        let s = s.into();
+        if !s.trim().is_empty() {
+            self.blocks.push(OutputBlock::Title(s));
+        }
     }
 
     pub fn say(&mut self, s: impl Into<String>) {
         let s = s.into();
         if !s.trim().is_empty() {
-            self.body.push(s);
+            self.blocks.push(OutputBlock::Text(s));
         }
-    }
-
-    pub fn set_exits(&mut self, s: impl Into<String>) {
-        self.exits = Some(s.into());
     }
 
     pub fn event(&mut self, s: impl Into<String>) {
         let s = s.into();
         if !s.trim().is_empty() {
-            self.events.push(s);
+            self.blocks.push(OutputBlock::Event(s));
         }
+    }
+
+    pub fn set_exits(&mut self, s: impl Into<String>) {
+        let s = s.into();
+        if s.trim().is_empty() {
+            return;
+        }
+
+        // ensure only one Exits block exists, always last
+        self.blocks.retain(|b| !matches!(b, OutputBlock::Exits(_)));
+        self.blocks.push(OutputBlock::Exits(s));
     }
 }
 
@@ -109,7 +124,7 @@ pub fn render_room(
 
     let mut room_desc = String::new();
 
-    out.say(format!("\n{}", room.name));
+    out.title(room.name.clone());
 
     room_desc.push_str(room.desc.trim());
 
@@ -362,7 +377,7 @@ enum ItemMatch<'a> {
 /// - Highest score wins
 /// - Ties => Many (ambiguity)
 /// - Score 0 => None
-pub fn find_item_by_words_scored<'a, F>(
+fn find_item_by_words_scored<'a, F>(
     world: &'a world::World,
     item_locations: &HashMap<String, world::ItemLocation>,
     flags: &HashSet<String>,

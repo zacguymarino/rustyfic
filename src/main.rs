@@ -7,23 +7,36 @@ use std::path::PathBuf;
 use std::collections::{HashMap, HashSet};
 
 fn flush_output(out: engine::Output) {
-    if let Some(title) = out.title {
-        println!("\n{}", title);
-    }
+    use engine::OutputBlock;
 
-    for line in out.body {
-        println!("{}", line);
-    }
+    let mut printed_anything = false;
+    let mut started_events = false;
 
-    if !out.events.is_empty() {
-        println!(); // visual separation
-        for ev in out.events {
-            println!("{}", ev);
+    for block in out.blocks {
+        match block {
+            OutputBlock::Title(t) => {
+                println!("\n{}", t);
+                printed_anything = true;
+            }
+            OutputBlock::Text(line) => {
+                println!("{}", line);
+                printed_anything = true;
+            }
+            OutputBlock::Event(ev) => {
+                if !started_events {
+                    if printed_anything {
+                        println!(); // visual separation before first event
+                    }
+                    started_events = true;
+                }
+                println!("{}", ev);
+                printed_anything = true;
+            }
+            OutputBlock::Exits(exits) => {
+                println!("\n{}", exits);
+                printed_anything = true;
+            }
         }
-    }
-
-    if let Some(exits) = out.exits {
-        println!("\n{}", exits);
     }
 }
 
