@@ -90,6 +90,12 @@ struct ActionConfig {
 
     #[serde(default)]
     requires_inventory: Vec<String>,
+
+    #[serde(default)]
+    missing_inventory_text: Option<String>,
+
+    #[serde(default)]
+    missing_scope_text: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -230,6 +236,8 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
                 conditions: a.conditions,
                 scope_requirements: a.scope_requirements,
                 requires_inventory: a.requires_inventory,
+                missing_inventory_text: a.missing_inventory_text.map(|s| normalize_multiline_desc(&s)),
+                missing_scope_text: a.missing_scope_text.map(|s| normalize_multiline_desc(&s)),
             })
             .collect();
 
@@ -280,13 +288,21 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
         let start_location = parse_item_location(&ic.start_location)
             .map_err(|msg| io::Error::new(io::ErrorKind::InvalidData, msg))?;
 
+        let (primary_name, aliases) = parse_name_and_aliases(&ic.name);
+        if primary_name.trim().is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Item '{}' has an empty name", ic.id),
+            ));
+        }
+
         let kind = parse_item_kind(&ic);
 
         let room_text = normalize_multiline_desc(&ic.room_text);
 
         let inventory_text = if ic.inventory_text.trim().is_empty() {
-            // fall back to name if no custom inventory text
-            ic.name.clone()
+            // fall back to PRIMARY name if no custom inventory text
+            primary_name.clone()
         } else {
             normalize_multiline_desc(&ic.inventory_text)
         };
@@ -299,7 +315,8 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
             ic.id.clone(),
             Item {
                 id: ic.id,
-                name: ic.name,
+                name: primary_name,
+                aliases,
                 room_text,
                 inventory_text,
                 examine_text,
@@ -346,6 +363,8 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
             conditions: a.conditions,
             scope_requirements: a.scope_requirements,
             requires_inventory: a.requires_inventory,
+            missing_inventory_text: a.missing_inventory_text.map(|s| normalize_multiline_desc(&s)),
+            missing_scope_text: a.missing_scope_text.map(|s| normalize_multiline_desc(&s)),
         })
         .collect();
 
@@ -473,4 +492,22 @@ fn parse_item_kind(ic: &ItemConfig) -> ItemKind {
         }
         _ => ItemKind::Simple,
     }
+}
+
+fn parse_name_and_aliases(raw: &str) -> (String, Vec<String>) {
+    // Split on | and keep non-empty trimmed parts
+    let parts: Vec<String> = raw
+        .split('|')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    if parts.is_empty() {
+        return ("".to_string(), Vec::new());
+    }
+
+    let primary = parts[0].clone();
+    let aliases = parts.into_iter().skip(1).collect();
+    (primary, aliases)
 }

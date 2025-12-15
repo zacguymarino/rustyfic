@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::world;
 use crate::engine::conditions::conditions_met;
 use crate::engine::output::Output;
+use crate::world;
 
 enum ItemMatch<'a> {
     None,
@@ -14,12 +14,17 @@ enum ItemMatch<'a> {
 /// - Highest score wins
 /// - Ties => Many (ambiguity)
 /// - Score 0 => None
+///
+/// `respect_conditions` controls whether `item.conditions` are enforced during matching.
+/// - true  => item must satisfy its visibility/interaction conditions
+/// - false => ignore item.conditions (useful for inventory-only operations like drop)
 fn find_item_by_words_scored<'a, F>(
     world: &'a world::World,
     item_locations: &HashMap<String, world::ItemLocation>,
     flags: &HashSet<String>,
     query: &str,
     filter: F,
+    respect_conditions: bool,
 ) -> ItemMatch<'a>
 where
     F: Fn(&'a world::Item, &world::ItemLocation) -> bool,
@@ -47,18 +52,36 @@ where
             continue;
         }
 
-        // Respect item conditions (same behavior as before)
-        if !conditions_met(&item.conditions, flags) {
+        // Optionally respect item visibility/interaction conditions
+        if respect_conditions && !conditions_met(&item.conditions, flags) {
             continue;
         }
 
-        let name_lower = item.name.to_lowercase();
-        let name_words: Vec<&str> = name_lower.split_whitespace().collect();
+        // Build matchable words from: primary name + aliases
+        let mut all_words: Vec<String> = Vec::new();
 
-        // Score = number of query words that appear in the item's name words
+        // primary display name
+        all_words.extend(
+            item.name
+                .split_whitespace()
+                .filter(|w| !w.is_empty())
+                .map(|w| w.to_lowercase()),
+        );
+
+        // extra aliases (if you added them in world/model + loader)
+        for alias in &item.aliases {
+            all_words.extend(
+                alias
+                    .split_whitespace()
+                    .filter(|w| !w.is_empty())
+                    .map(|w| w.to_lowercase()),
+            );
+        }
+
+        // Score = number of query words that appear in the item's name/alias words
         let mut score = 0usize;
         for qw in &query_words {
-            if name_words.iter().any(|iw| iw == qw) {
+            if all_words.iter().any(|iw| iw == qw) {
                 score += 1;
             }
         }
@@ -91,6 +114,34 @@ where
             ItemMatch::Many(best)
         }
     }
+}
+
+/// Convenience wrapper: default behavior (respect item.conditions)
+fn find_item<'a, F>(
+    world: &'a world::World,
+    item_locations: &HashMap<String, world::ItemLocation>,
+    flags: &HashSet<String>,
+    query: &str,
+    filter: F,
+) -> ItemMatch<'a>
+where
+    F: Fn(&'a world::Item, &world::ItemLocation) -> bool,
+{
+    find_item_by_words_scored(world, item_locations, flags, query, filter, true)
+}
+
+/// Convenience wrapper: ignore item.conditions
+fn find_item_ignore_conditions<'a, F>(
+    world: &'a world::World,
+    item_locations: &HashMap<String, world::ItemLocation>,
+    flags: &HashSet<String>,
+    query: &str,
+    filter: F,
+) -> ItemMatch<'a>
+where
+    F: Fn(&'a world::Item, &world::ItemLocation) -> bool,
+{
+    find_item_by_words_scored(world, item_locations, flags, query, filter, false)
 }
 
 pub fn handle_inventory(
@@ -140,7 +191,7 @@ pub fn handle_take(
         return;
     }
 
-    let result = find_item_by_words_scored(
+    let result = find_item(
         world,
         item_locations,
         flags,
@@ -181,7 +232,6 @@ pub fn handle_take_all_room(
 ) {
     use world::ItemLocation;
 
-    // Collect IDs of items we *can* take.
     let mut to_take: Vec<String> = Vec::new();
 
     for item in world.items.values() {
@@ -190,11 +240,8 @@ pub fn handle_take_all_room(
             None => continue,
         };
 
-        // Only items in this room, not inside containers
         if let ItemLocation::Room(room_id) = loc {
-            if room_id == current_room_id
-                && conditions_met(&item.conditions, flags)
-                && item.portable
+            if room_id == current_room_id && conditions_met(&item.conditions, flags) && item.portable
             {
                 to_take.push(item.id.clone());
             }
@@ -229,10 +276,11 @@ pub fn handle_drop(
         return;
     }
 
-    // For dropping, we don't need flags/conditions, so we pass an empty set.
+    // Drop should NOT be blocked by item.conditions (visibility flags, etc.)
+    // We pass an empty set for flags because we're ignoring conditions anyway.
     let dummy_flags = HashSet::new();
 
-    let result = find_item_by_words_scored(
+    let result = find_item_ignore_conditions(
         world,
         item_locations,
         &dummy_flags,
@@ -267,7 +315,6 @@ pub fn handle_drop_all(
 ) {
     use world::ItemLocation;
 
-    // Collect all items currently in inventory that we’re allowed to drop.
     let mut to_drop: Vec<String> = Vec::new();
 
     for item in world.items.values() {
@@ -277,8 +324,6 @@ pub fn handle_drop_all(
         };
 
         if let ItemLocation::Inventory = loc {
-            // Respect portable flag: if you somehow have a non-portable item in inventory,
-            // we’ll refuse to drop it.
             if item.portable {
                 to_drop.push(item.id.clone());
             }
@@ -324,11 +369,11 @@ pub fn handle_take_from_container(
         return;
     }
 
-    // 1) Find the container
-    let container_result = find_item_by_words_scored(
+    // Find the container (must be visible)
+    let container_result = find_item(
         world,
         item_locations,
-        &HashSet::new(),
+        flags,
         &container_query,
         |candidate, loc| {
             matches!(candidate.kind, ItemKind::Container(_))
@@ -359,14 +404,13 @@ pub fn handle_take_from_container(
         }
     };
 
-    // 2) Check interaction conditions
     if !props.conditions.is_empty() && !conditions_met(&props.conditions, flags) {
         out.say(format!("{}", props.closed_text.trim()));
         return;
     }
 
-    // 3) Find the item inside that container
-    let item_result = find_item_by_words_scored(
+    // Find the item inside (must be visible)
+    let item_result = find_item(
         world,
         item_locations,
         flags,
@@ -417,11 +461,10 @@ pub fn handle_take_all_from_container(
         return;
     }
 
-    // 1) Find the container (room or inventory), using scored matching
-    let container_match = find_item_by_words_scored(
+    let container_match = find_item(
         world,
         item_locations,
-        &HashSet::new(),
+        flags,
         &container_query,
         |candidate, loc| {
             let in_scope = match loc {
@@ -455,13 +498,11 @@ pub fn handle_take_all_from_container(
         _ => unreachable!(),
     };
 
-    // 2) Check container interaction conditions (open/closed)
     if !props.conditions.is_empty() && !conditions_met(&props.conditions, flags) {
         out.say(props.closed_text.trim());
         return;
     }
 
-    // 3) Collect all portable, visible items inside the container
     let mut to_take: Vec<String> = Vec::new();
 
     for item in world.items.values() {
@@ -471,10 +512,7 @@ pub fn handle_take_all_from_container(
         };
 
         if let ItemLocation::Item(parent_id) = loc {
-            if parent_id == &container.id
-                && conditions_met(&item.conditions, flags)
-                && item.portable
-            {
+            if parent_id == &container.id && conditions_met(&item.conditions, flags) && item.portable {
                 to_take.push(item.id.clone());
             }
         }
@@ -488,15 +526,10 @@ pub fn handle_take_all_from_container(
         return;
     }
 
-    // 4) Move each item to inventory
     for item_id in &to_take {
         if let Some(item) = world.items.get(item_id) {
             item_locations.insert(item_id.clone(), ItemLocation::Inventory);
-            out.say(format!(
-                "You take the {} from the {}.",
-                item.name,
-                container.name
-            ));
+            out.say(format!("You take the {} from the {}.", item.name, container.name));
         }
     }
 }
@@ -536,6 +569,11 @@ pub fn try_handle_container_store(
             continue;
         }
 
+        // Container itself must be visible
+        if !conditions_met(&c.conditions, flags) {
+            continue;
+        }
+
         let props = match &c.kind {
             ItemKind::Container(p) => p,
             _ => continue,
@@ -548,7 +586,7 @@ pub fn try_handle_container_store(
     }
 
     if !any_container_supports {
-        return false; // not a container-store verb in this context; let other systems handle it
+        return false;
     }
 
     let query = rest.trim().to_lowercase();
@@ -557,8 +595,8 @@ pub fn try_handle_container_store(
         return true;
     }
 
-    // 2) Find the carried item mentioned anywhere in the rest of the text
-    let item_match = find_item_by_words_scored(
+    // 2) Find carried item mentioned in rest (ignore conditions for inventory matching)
+    let item_match = find_item_ignore_conditions(
         world,
         item_locations,
         &HashSet::new(),
@@ -583,11 +621,11 @@ pub fn try_handle_container_store(
         return true;
     }
 
-    // 3) Find a container in scope that (a) matches query words AND (b) supports the verb
-    let cont_match = find_item_by_words_scored(
+    // 3) Find a container in scope that matches query and supports verb (must be visible)
+    let cont_match = find_item(
         world,
         item_locations,
-        &HashSet::new(),
+        flags,
         &query,
         |candidate, loc| {
             let in_scope = match loc {
@@ -626,7 +664,6 @@ pub fn try_handle_container_store(
         _ => unreachable!(),
     };
 
-    // 4) Check container interaction conditions
     if !props.conditions.is_empty() && !conditions_met(&props.conditions, flags) {
         out.say(format!("{}", props.closed_text.trim()));
         return true;
@@ -653,10 +690,7 @@ pub fn try_handle_container_store(
 
     out.say(format!(
         "You {} the {} {} the {}.",
-        verb_l,
-        item.name,
-        props.prep,
-        container.name
+        verb_l, item.name, props.prep, container.name
     ));
 
     // 7) Completion check
@@ -684,7 +718,6 @@ pub fn check_container_completion(
         _ => return,
     };
 
-    // If there's no complete_flag or no items to check, bail.
     let complete_flag = match &props.complete_flag {
         Some(f) => f,
         None => return,
@@ -694,25 +727,17 @@ pub fn check_container_completion(
         return;
     }
 
-    // If flag already set, don't re-check.
     if flags.contains(complete_flag) {
         return;
     }
 
-    // All required items must currently be inside this container.
     for needed_id in &props.complete_when {
         match item_locations.get(needed_id) {
-            Some(ItemLocation::Item(parent_id)) if parent_id == container_id => {
-                // good
-            }
-            _ => {
-                // missing or elsewhere
-                return;
-            }
+            Some(ItemLocation::Item(parent_id)) if parent_id == container_id => {}
+            _ => return,
         }
     }
 
-    // All present: set the flag.
     flags.insert(complete_flag.clone());
 
     if let Some(text) = &props.complete_text {
@@ -739,11 +764,11 @@ pub fn handle_examine(
         return;
     }
 
-    // 1) Prefer items in inventory
-    let inv_match = find_item_by_words_scored(
+    // Prefer items in inventory (respect conditions)
+    let inv_match = find_item_ignore_conditions(
         world,
         item_locations,
-        flags,
+        &HashSet::new(),
         &query,
         |_item, loc| matches!(loc, ItemLocation::Inventory),
     );
@@ -757,11 +782,11 @@ pub fn handle_examine(
         ItemMatch::None => None,
     };
 
-    // 2) If not in inventory, look in the room
+    // If not in inventory, look in the room
     let item = match item {
         Some(i) => i,
         None => {
-            let room_match = find_item_by_words_scored(
+            let room_match = find_item(
                 world,
                 item_locations,
                 flags,
@@ -786,7 +811,6 @@ pub fn handle_examine(
         }
     };
 
-    // Base examine text
     let txt = item.examine_text.trim();
     if txt.is_empty() {
         out.say(format!("You see nothing special about the {}.", item.name));
@@ -794,15 +818,12 @@ pub fn handle_examine(
         out.say(txt);
     }
 
-    // If this item is a container, handle contents / closed logic
     if let ItemKind::Container(props) = &item.kind {
-        // Closed?
         if !props.conditions.is_empty() && !conditions_met(&props.conditions, flags) {
             out.say(format!("{}", props.closed_text.trim()));
             return;
         }
 
-        // List contents
         let mut contents: Vec<&world::Item> = Vec::new();
 
         for other in world.items.values() {

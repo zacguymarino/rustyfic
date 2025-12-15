@@ -46,6 +46,8 @@ pub struct Action {
     pub conditions: Vec<String>,
     pub scope_requirements: Vec<String>,
     pub requires_inventory: Vec<String>,
+    pub missing_inventory_text: Option<String>,
+    pub missing_scope_text: Option<String>,
 }
 
 #[derive(Clone)]
@@ -66,6 +68,7 @@ pub enum ItemKind {
 pub struct Item {
     pub id: String,
     pub name: String,
+    pub aliases: Vec<String>,
     pub room_text: String,
     pub inventory_text: String,
     pub examine_text: String,

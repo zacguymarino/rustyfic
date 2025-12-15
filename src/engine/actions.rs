@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::world;
 use crate::engine::conditions::conditions_met;
+use crate::engine::helpers::{apply_effects, item_in_inventory, item_in_room, item_visible};
 use crate::engine::output::Output;
+use crate::world;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActionBlockReason {
@@ -10,132 +11,6 @@ enum ActionBlockReason {
     MissingScope,
     BlockedByConditions,
     Ambiguous,
-}
-
-pub fn evaluate_global_conditions(
-    out: &mut Output,
-    world: &world::World,
-    flags: &mut HashSet<String>,
-    current_room_id: &str,
-    fired: &mut HashSet<String>,
-) {
-    for gc in &world.global_conditions {
-        if gc.one_shot && fired.contains(&gc.id) {
-            continue;
-        }
-
-        if !conditions_met(&gc.conditions, flags) {
-            continue;
-        }
-
-        if !gc.allowed_rooms.is_empty() && !gc.allowed_rooms.iter().any(|r| r == current_room_id) {
-            continue;
-        }
-
-        if gc.disallowed_rooms.iter().any(|r| r == current_room_id) {
-            continue;
-        }
-
-        let txt = gc.response.trim();
-        if !txt.is_empty() {
-            out.event(txt.to_string());
-        }
-
-        for eff in &gc.effects {
-            if let Some(name) = eff.strip_prefix('!') {
-                flags.remove(name);
-            } else {
-                flags.insert(eff.clone());
-            }
-        }
-
-        if gc.one_shot {
-            fired.insert(gc.id.clone());
-        }
-    }
-}
-
-pub fn try_handle_action(
-    out: &mut Output,
-    room: &world::Room,
-    input: &str,
-    world: &world::World,
-    item_locations: &HashMap<String, world::ItemLocation>,
-    current_room_id: &str,
-    flags: &mut HashSet<String>,
-) -> bool {
-    let (exec, msg, handled) = evaluate_actions_for_input(
-        &room.actions,
-        input,
-        world,
-        item_locations,
-        current_room_id,
-        flags,
-    );
-
-    if let Some(action) = exec {
-        let txt = action.response.trim();
-        if !txt.is_empty() {
-            out.say(txt);
-        }
-
-        for eff in &action.effects {
-            if let Some(name) = eff.strip_prefix('!') {
-                flags.remove(name);
-            } else {
-                flags.insert(eff.clone());
-            }
-        }
-        return true;
-    }
-
-    if let Some(m) = msg {
-        out.say(m);
-        return true;
-    }
-
-    handled
-}
-
-pub fn try_handle_global_action(
-    out: &mut Output,
-    input: &str,
-    world: &world::World,
-    item_locations: &HashMap<String, world::ItemLocation>,
-    current_room_id: &str,
-    flags: &mut HashSet<String>,
-) -> bool {
-    let (exec, msg, handled) = evaluate_actions_for_input(
-        &world.global_actions,
-        input,
-        world,
-        item_locations,
-        current_room_id,
-        flags,
-    );
-
-    if let Some(action) = exec {
-        let txt = action.response.trim();
-        if !txt.is_empty() {
-            out.say(txt);
-        }
-
-        for eff in &action.effects {
-            if let Some(name) = eff.strip_prefix('!') {
-                flags.remove(name);
-            } else {
-                flags.insert(eff.clone());
-            }
-        }
-        return true;
-    }
-
-    if let Some(m) = msg {
-        out.say(m);
-        return true;
-    }
-
-    handled
 }
 
 fn tokenize(input: &str) -> Vec<String> {
@@ -169,43 +44,44 @@ fn phrase_match_score(phrase: &str, tokens: &[String]) -> usize {
     }
 }
 
-fn item_in_room(
-    item_id: &str,
-    item_locations: &HashMap<String, world::ItemLocation>,
-    room_id: &str,
-) -> bool {
-    match item_locations.get(item_id) {
-        Some(world::ItemLocation::Room(r)) => r == room_id,
-        _ => false,
-    }
-}
-
-fn item_in_inventory(
-    item_id: &str,
-    item_locations: &HashMap<String, world::ItemLocation>,
-) -> bool {
-    matches!(item_locations.get(item_id), Some(world::ItemLocation::Inventory))
-}
-
 /// Require that the player's input mentions the required item (weakly) by default name words.
 /// Rule: at least ONE word from item.name must appear as a token.
 fn input_mentions_item_name(item: &world::Item, tokens: &[String]) -> bool {
-    let name_words: Vec<String> = item
-        .name
-        .split_whitespace()
-        .filter(|w| !w.is_empty())
-        .map(|w| w.to_lowercase())
-        .collect();
+    // Build a list of phrases to consider: primary name + aliases
+    let mut phrases: Vec<&str> = Vec::new();
+    phrases.push(item.name.as_str());
+    for a in &item.aliases {
+        phrases.push(a.as_str());
+    }
 
-    name_words
-        .iter()
-        .any(|nw| tokens.iter().any(|t| t == nw))
+    // Rule: at least ONE word from ANY phrase must appear as a token.
+    for phrase in phrases {
+        let name_words: Vec<String> = phrase
+            .split_whitespace()
+            .filter(|w| !w.is_empty())
+            .map(|w| w.to_lowercase())
+            .collect();
+
+        if name_words.iter().any(|nw| tokens.iter().any(|t| t == nw)) {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn missing_inventory_message(action: &world::Action, world: &world::World) -> String {
+    if let Some(txt) = &action.missing_inventory_text {
+        let t = txt.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+
     if action.requires_inventory.is_empty() {
         return "You don't have what you need.".to_string();
     }
+
     let mut names: Vec<String> = Vec::new();
     for id in &action.requires_inventory {
         if let Some(it) = world.items.get(id) {
@@ -214,6 +90,7 @@ fn missing_inventory_message(action: &world::Action, world: &world::World) -> St
             names.push(id.clone());
         }
     }
+
     if names.len() == 1 {
         format!("You need the {}.", names[0])
     } else {
@@ -222,6 +99,13 @@ fn missing_inventory_message(action: &world::Action, world: &world::World) -> St
 }
 
 fn missing_scope_message(action: &world::Action, world: &world::World) -> String {
+    if let Some(txt) = &action.missing_scope_text {
+        let t = txt.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+
     if action.scope_requirements.is_empty() {
         return "You don't see that here.".to_string();
     }
@@ -242,6 +126,85 @@ fn missing_scope_message(action: &world::Action, world: &world::World) -> String
     }
 }
 
+/// Public: attempt to handle a per-room action.
+pub fn try_handle_action(
+    out: &mut Output,
+    room: &world::Room,
+    input: &str,
+    world: &world::World,
+    item_locations: &HashMap<String, world::ItemLocation>,
+    current_room_id: &str,
+    flags: &mut HashSet<String>,
+) -> bool {
+    let (exec, msg, handled) = evaluate_actions_for_input(
+        &room.actions,
+        input,
+        world,
+        item_locations,
+        current_room_id,
+        flags,
+    );
+
+    if let Some(action) = exec {
+        let txt = action.response.trim();
+        if !txt.is_empty() {
+            out.say(txt);
+        }
+
+        apply_effects(flags, &action.effects);
+        return true;
+    }
+
+    if let Some(m) = msg {
+        out.say(m);
+        return true;
+    }
+
+    handled
+}
+
+/// Public: attempt to handle a global action.
+pub fn try_handle_global_action(
+    out: &mut Output,
+    input: &str,
+    world: &world::World,
+    item_locations: &HashMap<String, world::ItemLocation>,
+    current_room_id: &str,
+    flags: &mut HashSet<String>,
+) -> bool {
+    let (exec, msg, handled) = evaluate_actions_for_input(
+        &world.global_actions,
+        input,
+        world,
+        item_locations,
+        current_room_id,
+        flags,
+    );
+
+    if let Some(action) = exec {
+        let txt = action.response.trim();
+        if !txt.is_empty() {
+            out.say(txt);
+        }
+
+        apply_effects(flags, &action.effects);
+        return true;
+    }
+
+    if let Some(m) = msg {
+        out.say(m);
+        return true;
+    }
+
+    handled
+}
+
+/// Core evaluator used by both per-room actions and global actions.
+///
+/// Returns:
+/// - Some(action) if one executable action matches best
+/// - Some(message) if we should show a helpful blocked/ambiguous message
+/// - handled=true if the input should be considered consumed (even if not executed)
 fn evaluate_actions_for_input<'a>(
     actions: &'a [world::Action],
     input: &str,
@@ -262,7 +225,7 @@ fn evaluate_actions_for_input<'a>(
     // Track best blocked attempt (only if intent is strong)
     let mut best_blocked: Option<(usize, ActionBlockReason, String)> = None;
 
-    for action in actions {
+    'action_loop: for action in actions {
         // --- Verb match ---
         let verb_score = action
             .verbs
@@ -287,7 +250,6 @@ fn evaluate_actions_for_input<'a>(
                 .unwrap_or(0);
 
             if best == 0 {
-                // If nouns exist and none match, intent is weak; don't "catch" the command.
                 continue;
             }
             best
@@ -308,9 +270,14 @@ fn evaluate_actions_for_input<'a>(
                 }
             };
 
+            // 🔒 Critical fix:
+            // If the scope item is not VISIBLE, do not allow this action to match at all.
+            if !item_visible(item, flags) {
+                continue 'action_loop;
+            }
+
             if !item_in_room(req_id, item_locations, current_room_id) {
                 scope_ok = false;
-                // still may be "attempting", but scope isn't satisfied
             }
 
             // Require at least ONE name-word in input to avoid hijacking
@@ -337,7 +304,6 @@ fn evaluate_actions_for_input<'a>(
         let cond_ok = conditions_met(&action.conditions, flags);
 
         // Strong intent definition:
-        // verb matched + (nouns ok if required) + (if scope reqs exist, the player mentioned them)
         let intent_strong = if action.scope_requirements.is_empty() {
             true
         } else {
@@ -377,7 +343,6 @@ fn evaluate_actions_for_input<'a>(
                     "You can't do that right now.".to_string(),
                 )
             } else {
-                // Shouldn't happen often, but keep a safe default
                 (
                     ActionBlockReason::BlockedByConditions,
                     "You can't do that.".to_string(),
