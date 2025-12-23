@@ -260,6 +260,11 @@ fn default_true() -> bool {
 /// Public API: load a world from a .toml file on disk.
 pub fn load_world_from_file(path: &Path) -> io::Result<World> {
     let contents = fs::read_to_string(path)?;
+    load_world_from_str(&contents)
+}
+
+/// Public API: load a world from a TOML string.
+pub fn load_world_from_str(contents: &str) -> io::Result<World> {
     let world_file: WorldFile = toml::from_str(&contents)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 

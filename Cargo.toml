@@ -6,3 +6,8 @@ edition = "2024"
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.8"
+wasm-bindgen = { version = "0.2.95", optional = true }
+serde-wasm-bindgen = { version = "0.6.5", optional = true }
+
+[features]
+wasm = ["wasm-bindgen", "serde-wasm-bindgen"]

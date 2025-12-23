@@ -1,4 +1,6 @@
-#[derive(Debug, Clone)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
 pub enum OutputBlock {
     Title(String),
     Text(String),
@@ -6,7 +8,7 @@ pub enum OutputBlock {
     Exits(String),
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize)]
 pub struct Output {
     pub blocks: Vec<OutputBlock>,
 }

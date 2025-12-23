@@ -12,7 +12,7 @@ use engine::{
 };
 use world::{ItemLocation, World};
 
-pub use world::load_world_from_file;
+pub use world::{load_world_from_file, load_world_from_str};
 
 pub struct GameState {
     pub world: World,
@@ -24,6 +24,70 @@ pub struct GameState {
     pub npc_locations: HashMap<String, String>,
     pub turn_index: u64,
     pub action_index: u64,
+}
+
+#[cfg(feature = "wasm")]
+mod wasm_bindings {
+    use super::*;
+    use serde::Serialize;
+    use serde_wasm_bindgen::to_value;
+    use wasm_bindgen::prelude::*;
+
+    #[derive(Serialize)]
+    struct WasmStepResult {
+        blocks: Vec<engine::OutputBlock>,
+        quit: bool,
+    }
+
+    #[wasm_bindgen]
+    pub struct WasmGame {
+        state: GameState,
+        initialized: bool,
+    }
+
+    #[wasm_bindgen]
+    impl WasmGame {
+        /// Create a new game from a TOML world string. Call `init()` to get the initial render.
+        #[wasm_bindgen(constructor)]
+        pub fn new(world_toml: &str) -> Result<WasmGame, JsValue> {
+            let world =
+                load_world_from_str(world_toml).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            Ok(WasmGame {
+                state: GameState::new(world),
+                initialized: false,
+            })
+        }
+
+        /// Initialize the game and return the initial render output.
+        #[wasm_bindgen]
+        pub fn init(&mut self) -> JsValue {
+            if !self.initialized {
+                self.initialized = true;
+            }
+            match self.state.initialize() {
+                Some(out) => to_value(&WasmStepResult {
+                    blocks: out.blocks,
+                    quit: false,
+                })
+                .unwrap_or(JsValue::NULL),
+                None => JsValue::NULL,
+            }
+        }
+
+        /// Process a player command and return the resulting output blocks and quit flag.
+        #[wasm_bindgen]
+        pub fn step(&mut self, input: &str) -> JsValue {
+            if !self.initialized {
+                let _ = self.init();
+            }
+            let (out, quit) = self.state.step(input);
+            to_value(&WasmStepResult {
+                blocks: out.blocks,
+                quit,
+            })
+            .unwrap_or(JsValue::NULL)
+        }
+    }
 }
 
 impl GameState {
