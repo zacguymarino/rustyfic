@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
+use crate::engine::helpers::apply_effects;
 use crate::engine::output::Output;
 use crate::world;
-use crate::engine::helpers::apply_effects;
 
 /// Returns true if all conditions are satisfied.
 /// Condition syntax:

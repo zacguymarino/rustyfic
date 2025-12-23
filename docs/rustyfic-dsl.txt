@@ -4,7 +4,7 @@ Rustyfic Interactive Fiction DSL
 This document describes the current domain-specific language (DSL) used by the
 Rustyfic interactive fiction engine. The DSL is expressed using TOML files and
 is designed to define complete text adventure games, including world structure,
-rooms, items, actions, containers, and global state-driven logic.
+rooms, items, NPCs, actions, containers, and global state-driven logic.
 
 All sections below describe currently implemented and supported features.
 
@@ -54,7 +54,7 @@ Required fields:
 
 - desc (multiline string)
   Base room description. This should describe the environment itself and should
-  NOT explicitly list items or containers, which are described separately.
+  NOT explicitly list items or NPCs, which are described separately.
 
 Optional nested blocks:
 - [[room.exit]]
@@ -218,13 +218,14 @@ Required fields:
   Unique item identifier.
 
 - name (string)
-  Display name.
+  Display name. May include aliases separated by '|'.
 
 - start_location (string)
   Initial location:
     "room:<room_id>"
     "inventory"
     "item:<container_id>"
+    "npc:<npc_id>"  (item starts carried by an NPC)
 
 Optional fields:
 - portable (boolean, default true)
@@ -312,14 +313,164 @@ As you hang the cloak, the darkness lifts.
 
 
 ------------------------------------------------------------
+[[npc]]
+------------------------------------------------------------
+
+Defines a non-player character (NPC).
+
+NPCs exist in rooms, appear in room descriptions when visible, may be examined,
+and may define their own verb-driven interactions.
+
+Required fields:
+- id (string)
+  Unique NPC identifier.
+
+- name (string)
+  Display name. May include aliases separated by '|'.
+
+- start_room (string)
+  ID of the room where the NPC initially appears.
+
+Optional fields:
+- room_text (multiline string)
+  Description appended to the room description when the NPC is present and visible.
+
+- examine_text (multiline string)
+  Text shown when examining the NPC.
+
+- conditions (array of strings)
+  Flags that control whether the NPC is visible or interactable.
+
+- roam_enabled (boolean)
+  If true, the NPC may relocate after player movement.
+
+- roam_rooms (array of strings)
+  List of room IDs the NPC is allowed to roam between.
+
+- roam_chance_percent (integer 0-100)
+  Chance that the NPC relocates after a successful player move.
+
+- block_movement (boolean)
+  If true, the NPC can prevent the player from leaving the room while visible.
+
+- block_conditions (array of strings)
+  Additional conditions that must be met for blocking to apply.
+
+- block_text (string)
+  Custom message shown when blocking movement (default: "<name> blocks your way.").
+
+- block_exits (array of strings)
+  Optional list of exit directions/verbs this NPC blocks. If omitted/empty, blocks all exits.
+
+- foe (boolean)
+  If true, the NPC may attack when blocking movement.
+
+- attack_chance_percent (integer 0-100)
+  Chance to attack when blocking.
+
+- attack_text (string)
+  Message shown when an attack triggers (default: "<name> strikes at you!").
+
+- attack_effects (array of strings)
+  Effects applied when an attack triggers.
+
+Optional nested blocks:
+- [[npc.action]]
+- [[npc.dialogue]]
+
+Example:
+[[npc]]
+id = "guard"
+name = "guard|sentinel"
+start_room = "field"
+room_text = "A stern guard stands here."
+examine_text = "The guard watches you closely."
+conditions = ["!guard_gone"]
+roam_enabled = true
+roam_rooms = ["field", "forest", "house"]
+roam_chance_percent = 50
+
+
+------------------------------------------------------------
+[[npc.action]]
+------------------------------------------------------------
+
+Defines a verb-driven interaction specific to an NPC.
+
+NPC actions use the same matching, condition, and effect rules as room and
+global actions, but only trigger when the NPC is present and referenced.
+
+Required fields:
+- id (string)
+  Unique identifier.
+
+- verbs (array of strings)
+  Accepted verbs that trigger this action.
+
+Optional fields:
+- nouns (array of strings)
+  Required noun phrases.
+
+- conditions (array of strings)
+  Flags required for the action to be available.
+
+- effects (array of strings)
+  Flags to add or remove when the action succeeds.
+
+- requires_inventory (array of item IDs)
+  Items the player must be carrying.
+
+- missing_inventory_text (string)
+  Text shown if required inventory is missing.
+
+- response (string or multiline string)
+  Text printed when the action succeeds.
+
+Example:
+[[npc.action]]
+id = "talk_guard"
+verbs = ["talk", "speak"]
+nouns = ["guard"]
+response = "The guard grunts and says nothing."
+
+Player commands involving NPCs:
+- give <item> to <npc> (moves an inventory item onto the NPC)
+- take <item> from <npc> (moves an item from the NPC to inventory)
+- talk <npc> (fires the first matching dialogue entry for that NPC)
+
+[[npc.dialogue]]
+------------------------------------------------------------
+
+Simple dialogue entries evaluated in order when the player uses "talk <npc>".
+
+Required fields:
+- id (string)
+  Unique per-NPC identifier.
+
+- response (string or multiline string)
+  Text printed when the dialogue entry fires.
+
+Optional fields:
+- conditions (array of strings)
+  Conditions required for this entry.
+
+- effects (array of strings)
+  Flags added/removed when the entry fires.
+
+- one_shot (boolean, default true)
+  If true, the entry fires only once.
+
+
+------------------------------------------------------------
 General Notes
 ------------------------------------------------------------
 
 - All condition arrays support negation via "!flag".
 - Matching is based on full words, not substrings.
-- Item disambiguation is resolved by scoring word overlap.
+- Disambiguation is resolved by scoring word overlap.
 - Output ordering ensures that important events (like global conditions)
   appear distinctly and clearly.
+- NPC actions reuse the same action resolution system as room and global actions.
 
 This document reflects the current implemented feature set of Rustyfic.
 Future features should extend this documentation incrementally.

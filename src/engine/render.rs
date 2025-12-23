@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::world;
 use crate::engine::conditions::conditions_met;
 use crate::engine::output::Output;
+use crate::world;
 
 pub fn render_room(
     out: &mut Output,
@@ -10,6 +10,7 @@ pub fn render_room(
     flags: &HashSet<String>,
     world: &world::World,
     item_locations: &HashMap<String, world::ItemLocation>,
+    npc_locations: &HashMap<String, String>,
 ) {
     use world::ItemLocation;
 
@@ -50,6 +51,23 @@ pub fn render_room(
         }
     }
 
+    for npc in world.npcs.values() {
+        let npc_room = match npc_locations.get(&npc.id) {
+            Some(r) => r,
+            None => continue,
+        };
+
+        if npc_room == &room.id && conditions_met(&npc.conditions, flags) {
+            let txt = npc.room_text.trim();
+            if !txt.is_empty() {
+                if !room_desc.is_empty() {
+                    room_desc.push(' ');
+                }
+                room_desc.push_str(txt);
+            }
+        }
+    }
+
     out.say(room_desc);
 
     let visible_exits: Vec<&world::Exit> = room
@@ -77,6 +95,7 @@ pub fn room_depends_on_any_flag(
     room: &world::Room,
     world: &world::World,
     item_locations: &HashMap<String, world::ItemLocation>,
+    npc_locations: &HashMap<String, String>,
     flags_changed: &HashSet<String>,
 ) -> bool {
     use world::{ItemKind, ItemLocation};
@@ -136,6 +155,18 @@ pub fn room_depends_on_any_flag(
                             _ => {}
                         }
                     }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // NPC visibility in this room depends on flags?
+    for npc in world.npcs.values() {
+        match npc_locations.get(&npc.id) {
+            Some(room_id) if room_id == &room.id => {
+                if conds_touch_changed(&npc.conditions, flags_changed) {
+                    return true;
                 }
             }
             _ => {}

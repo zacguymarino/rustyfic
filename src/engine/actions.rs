@@ -14,10 +14,7 @@ enum ActionBlockReason {
 }
 
 fn tokenize(input: &str) -> Vec<String> {
-    input
-        .split_whitespace()
-        .map(|t| t.to_lowercase())
-        .collect()
+    input.split_whitespace().map(|t| t.to_lowercase()).collect()
 }
 
 /// Phrase matches if ALL words in phrase appear as full tokens (order-independent).
@@ -205,7 +202,7 @@ pub fn try_handle_global_action(
 /// - Some(action) if one executable action matches best
 /// - Some(message) if we should show a helpful blocked/ambiguous message
 /// - handled=true if the input should be considered consumed (even if not executed)
-fn evaluate_actions_for_input<'a>(
+pub(crate) fn evaluate_actions_for_input<'a>(
     actions: &'a [world::Action],
     input: &str,
     world: &'a world::World,

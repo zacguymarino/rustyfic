@@ -1,8 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::engine::actions::evaluate_actions_for_input;
 use crate::engine::conditions::conditions_met;
 use crate::engine::output::Output;
 use crate::world;
+
+use crate::engine::npcs::{NpcMatch, find_npc_by_words_scored, try_handle_examine_npc};
 
 enum ItemMatch<'a> {
     None,
@@ -241,7 +244,9 @@ pub fn handle_take_all_room(
         };
 
         if let ItemLocation::Room(room_id) = loc {
-            if room_id == current_room_id && conditions_met(&item.conditions, flags) && item.portable
+            if room_id == current_room_id
+                && conditions_met(&item.conditions, flags)
+                && item.portable
             {
                 to_take.push(item.id.clone());
             }
@@ -280,13 +285,10 @@ pub fn handle_drop(
     // We pass an empty set for flags because we're ignoring conditions anyway.
     let dummy_flags = HashSet::new();
 
-    let result = find_item_ignore_conditions(
-        world,
-        item_locations,
-        &dummy_flags,
-        &query,
-        |_item, loc| matches!(loc, ItemLocation::Inventory),
-    );
+    let result =
+        find_item_ignore_conditions(world, item_locations, &dummy_flags, &query, |_item, loc| {
+            matches!(loc, ItemLocation::Inventory)
+        });
 
     let item = match result {
         ItemMatch::None => {
@@ -442,7 +444,174 @@ pub fn handle_take_from_container(
     }
 
     item_locations.insert(item.id.clone(), ItemLocation::Inventory);
-    out.say(format!("You take the {} from the {}.", item.name, container.name));
+    out.say(format!(
+        "You take the {} from the {}.",
+        item.name, container.name
+    ));
+}
+
+/// Give an item in your inventory to an NPC in the current room.
+pub fn handle_give_to_npc(
+    out: &mut Output,
+    item_locations: &mut HashMap<String, world::ItemLocation>,
+    world: &world::World,
+    npc_locations: &HashMap<String, String>,
+    current_room_id: &str,
+    item_name: &str,
+    npc_name: &str,
+    flags: &mut HashSet<String>,
+) -> bool {
+    use world::ItemLocation;
+
+    let item_query = item_name.trim().to_lowercase();
+    let npc_query = npc_name.trim().to_lowercase();
+
+    if item_query.is_empty() && npc_query.is_empty() {
+        out.say("Give what to whom?");
+        return true;
+    }
+    if item_query.is_empty() {
+        out.say("Give what?");
+        return true;
+    }
+    if npc_query.is_empty() {
+        out.say("Give it to whom?");
+        return true;
+    }
+
+    let npc_match =
+        find_npc_by_words_scored(world, npc_locations, flags, current_room_id, &npc_query);
+
+    let npc = match npc_match {
+        NpcMatch::None => {
+            out.say("You don't see anyone like that here.");
+            return true;
+        }
+        NpcMatch::Many(_) => {
+            out.say("Be more specific.");
+            return true;
+        }
+        NpcMatch::One(n) => n,
+    };
+
+    let item_result =
+        find_item_ignore_conditions(world, item_locations, flags, &item_query, |_item, loc| {
+            matches!(loc, ItemLocation::Inventory)
+        });
+
+    let item = match item_result {
+        ItemMatch::None => {
+            out.say("You aren't carrying that.");
+            return true;
+        }
+        ItemMatch::Many(_) => {
+            out.say("Be more specific.");
+            return true;
+        }
+        ItemMatch::One(i) => i,
+    };
+
+    if !item.portable {
+        out.say(format!("You can't give away the {}.", item.name));
+        return true;
+    }
+
+    // Try NPC-specific actions first (e.g., bribe) by looking for an action that requires this item.
+    if let Some(action) = npc.actions.iter().find(|a| {
+        a.requires_inventory.iter().any(|req| req == &item.id)
+            && conditions_met(&a.conditions, flags)
+    }) {
+        let txt = action.response.trim();
+        if !txt.is_empty() {
+            out.say(txt);
+        }
+        crate::engine::helpers::apply_effects(flags, &action.effects);
+
+        // Consume the item by removing its location entry; prevents taking it back.
+        item_locations.remove(&item.id);
+        return true;
+    }
+
+    // Default give: move item to NPC
+    item_locations.insert(item.id.clone(), ItemLocation::Npc(npc.id.clone()));
+    out.say(format!("You give the {} to {}.", item.name, npc.name));
+    true
+}
+
+/// Take an item from an NPC in the current room.
+/// Returns true if the command was handled (including error messages).
+/// Returns false if no matching NPC is in scope, allowing other handlers to try.
+pub fn handle_take_from_npc(
+    out: &mut Output,
+    item_locations: &mut HashMap<String, world::ItemLocation>,
+    world: &world::World,
+    npc_locations: &HashMap<String, String>,
+    current_room_id: &str,
+    item_name: &str,
+    npc_name: &str,
+    flags: &HashSet<String>,
+) -> bool {
+    use world::ItemLocation;
+
+    let item_query = item_name.trim().to_lowercase();
+    let npc_query = npc_name.trim().to_lowercase();
+
+    if item_query.is_empty() && npc_query.is_empty() {
+        out.say("Take what from whom?");
+        return true;
+    }
+    if item_query.is_empty() {
+        out.say("Take what?");
+        return true;
+    }
+    if npc_query.is_empty() {
+        out.say("Take it from whom?");
+        return true;
+    }
+
+    let npc_match =
+        find_npc_by_words_scored(world, npc_locations, flags, current_room_id, &npc_query);
+
+    let npc = match npc_match {
+        NpcMatch::None => return false, // let other handlers try (e.g., containers)
+        NpcMatch::Many(_) => {
+            out.say("Be more specific.");
+            return true;
+        }
+        NpcMatch::One(n) => n,
+    };
+
+    let item_result = find_item(
+        world,
+        item_locations,
+        flags,
+        &item_query,
+        |_item, loc| match loc {
+            ItemLocation::Npc(holder_id) => holder_id == &npc.id,
+            _ => false,
+        },
+    );
+
+    let item = match item_result {
+        ItemMatch::None => {
+            out.say(format!("{} doesn't have that.", npc.name));
+            return true;
+        }
+        ItemMatch::Many(_) => {
+            out.say("Be more specific.");
+            return true;
+        }
+        ItemMatch::One(i) => i,
+    };
+
+    if !item.portable {
+        out.say(format!("You can't take the {}.", item.name));
+        return true;
+    }
+
+    item_locations.insert(item.id.clone(), ItemLocation::Inventory);
+    out.say(format!("You take the {} from {}.", item.name, npc.name));
+    true
 }
 
 pub fn handle_take_all_from_container(
@@ -512,7 +681,10 @@ pub fn handle_take_all_from_container(
         };
 
         if let ItemLocation::Item(parent_id) = loc {
-            if parent_id == &container.id && conditions_met(&item.conditions, flags) && item.portable {
+            if parent_id == &container.id
+                && conditions_met(&item.conditions, flags)
+                && item.portable
+            {
                 to_take.push(item.id.clone());
             }
         }
@@ -529,7 +701,10 @@ pub fn handle_take_all_from_container(
     for item_id in &to_take {
         if let Some(item) = world.items.get(item_id) {
             item_locations.insert(item_id.clone(), ItemLocation::Inventory);
-            out.say(format!("You take the {} from the {}.", item.name, container.name));
+            out.say(format!(
+                "You take the {} from the {}.",
+                item.name, container.name
+            ));
         }
     }
 }
@@ -610,7 +785,10 @@ pub fn try_handle_container_store(
             return true;
         }
         ItemMatch::Many(_) => {
-            out.say(format!("Be more specific about what you want to {}.", verb_l));
+            out.say(format!(
+                "Be more specific about what you want to {}.",
+                verb_l
+            ));
             return true;
         }
         ItemMatch::One(i) => i,
@@ -622,38 +800,38 @@ pub fn try_handle_container_store(
     }
 
     // 3) Find a container in scope that matches query and supports verb (must be visible)
-    let cont_match = find_item(
-        world,
-        item_locations,
-        flags,
-        &query,
-        |candidate, loc| {
-            let in_scope = match loc {
-                ItemLocation::Room(room_id) => room_id == current_room_id,
-                ItemLocation::Inventory => true,
-                _ => false,
-            };
+    let cont_match = find_item(world, item_locations, flags, &query, |candidate, loc| {
+        let in_scope = match loc {
+            ItemLocation::Room(room_id) => room_id == current_room_id,
+            ItemLocation::Inventory => true,
+            _ => false,
+        };
 
-            if !in_scope {
-                return false;
-            }
+        if !in_scope {
+            return false;
+        }
 
-            let props = match &candidate.kind {
-                ItemKind::Container(p) => p,
-                _ => return false,
-            };
+        let props = match &candidate.kind {
+            ItemKind::Container(p) => p,
+            _ => return false,
+        };
 
-            props.verbs.iter().any(|v| v.eq_ignore_ascii_case(&verb_l))
-        },
-    );
+        props.verbs.iter().any(|v| v.eq_ignore_ascii_case(&verb_l))
+    });
 
     let container = match cont_match {
         ItemMatch::None => {
-            out.say(format!("Where do you want to {} the {}?", verb_l, item.name));
+            out.say(format!(
+                "Where do you want to {} the {}?",
+                verb_l, item.name
+            ));
             return true;
         }
         ItemMatch::Many(_) => {
-            out.say(format!("Be more specific about where you want to {} it.", verb_l));
+            out.say(format!(
+                "Be more specific about where you want to {} it.",
+                verb_l
+            ));
             return true;
         }
         ItemMatch::One(c) => c,
@@ -752,6 +930,7 @@ pub fn handle_examine(
     out: &mut Output,
     world: &world::World,
     item_locations: &HashMap<String, world::ItemLocation>,
+    npc_locations: &HashMap<String, String>,
     current_room_id: &str,
     target_name: &str,
     flags: &HashSet<String>,
@@ -761,6 +940,19 @@ pub fn handle_examine(
     let query = target_name.trim().to_lowercase();
     if query.is_empty() {
         out.say("Examine what?");
+        return;
+    }
+
+    // Prefer NPC examine in-room
+    if try_handle_examine_npc(
+        out,
+        item_locations,
+        world,
+        npc_locations,
+        current_room_id,
+        &query,
+        flags,
+    ) {
         return;
     }
 
@@ -793,6 +985,13 @@ pub fn handle_examine(
                 &query,
                 |_item, loc| match loc {
                     ItemLocation::Room(room_id) => room_id == current_room_id,
+                    ItemLocation::Npc(holder_id) => {
+                        // Only if NPC is in the room
+                        npc_locations
+                            .get(holder_id)
+                            .map(|r| r == current_room_id)
+                            .unwrap_or(false)
+                    }
                     _ => false,
                 },
             );

@@ -22,7 +22,11 @@ impl Output {
             return;
         }
 
-        if let Some(pos) = self.blocks.iter().position(|b| matches!(b, OutputBlock::Exits(_))) {
+        if let Some(pos) = self
+            .blocks
+            .iter()
+            .position(|b| matches!(b, OutputBlock::Exits(_)))
+        {
             self.blocks.insert(pos, OutputBlock::Title(s));
         } else {
             self.blocks.push(OutputBlock::Title(s));
@@ -35,7 +39,11 @@ impl Output {
             return;
         }
 
-        if let Some(pos) = self.blocks.iter().position(|b| matches!(b, OutputBlock::Exits(_))) {
+        if let Some(pos) = self
+            .blocks
+            .iter()
+            .position(|b| matches!(b, OutputBlock::Exits(_)))
+        {
             self.blocks.insert(pos, OutputBlock::Text(s));
         } else {
             self.blocks.push(OutputBlock::Text(s));
@@ -49,7 +57,11 @@ impl Output {
         }
 
         // If Exits is already present, keep it last by inserting before it.
-        if let Some(pos) = self.blocks.iter().position(|b| matches!(b, OutputBlock::Exits(_))) {
+        if let Some(pos) = self
+            .blocks
+            .iter()
+            .position(|b| matches!(b, OutputBlock::Exits(_)))
+        {
             self.blocks.insert(pos, OutputBlock::Event(s));
         } else {
             self.blocks.push(OutputBlock::Event(s));
