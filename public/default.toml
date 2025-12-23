@@ -1,0 +1,169 @@
+[world]
+id = "aurora"
+name = "Aurora Salvage"
+start_room = "landing"
+desc = """
+You’ve set down on the alien world Aurora to recover three legendary artifacts before leaving for home. Find them, stow them safely in your ship, and launch.
+"""
+
+[[room]]
+id = "landing"
+name = "Landing Site"
+desc = """
+Your small explorer ship rests on scorched glassy soil. Jagged spires ring the horizon. A canyon yawns to the east; a crystal forest glitters to the north; wreckage smolders to the south.
+"""
+
+  [[room.exit]]
+  direction = "north"
+  target    = "crystal_grove"
+  verbs     = ["north", "n"]
+
+  [[room.exit]]
+  direction = "east"
+  target    = "canyon"
+  verbs     = ["east", "e"]
+
+  [[room.exit]]
+  direction = "south"
+  target    = "wreck"
+  verbs     = ["south", "s"]
+
+  [[room.action]]
+  id = "launch_home"
+  verbs = ["launch", "depart", "takeoff", "leave"]
+  scope_requirements = ["ship"]
+  conditions = ["departure_ready"]
+  response = "You seal the hatch, ignite the engines, and ascend toward home. Mission accomplished."
+  effects = ["game_won"]
+
+[[room]]
+id = "crystal_grove"
+name = "Crystal Grove"
+desc = """
+Luminescent crystal trunks rise from the ground like frozen lightning. The air hums softly.
+"""
+
+  [[room.exit]]
+  direction = "south"
+  target    = "landing"
+  verbs     = ["south", "s"]
+
+[[room]]
+id = "wreck"
+name = "Smoldering Wreck"
+desc = """
+Twisted metal and charred plating lie half-buried. You smell burned circuitry and ozone.
+"""
+
+  [[room.exit]]
+  direction = "north"
+  target    = "landing"
+  verbs     = ["north", "n"]
+
+[[room]]
+id = "canyon"
+name = "Echoing Canyon"
+desc = """
+A narrow canyon channels a dry wind. An alien sentinel watches from a ledge, blocking the way east.
+"""
+
+  [[room.exit]]
+  direction = "west"
+  target    = "landing"
+  verbs     = ["west", "w"]
+
+  [[room.exit]]
+  direction = "east"
+  target    = "temple"
+  verbs     = ["east", "e"]
+
+[[room]]
+id = "temple"
+name = "Ancient Temple"
+desc = """
+Carved stone arches glow with faint bioluminescent script. An altar sits beneath a cracked dome.
+"""
+
+  [[room.exit]]
+  direction = "west"
+  target    = "canyon"
+  verbs     = ["west", "w"]
+
+[[item]]
+id = "ship"
+name = "explorer ship|ship|vessel"
+start_location = "room:landing"
+portable = false
+kind = "container"
+capacity = 10
+complete_when = ["stardust_pearl", "gravity_core", "ancient_tablet"]
+complete_flag = "departure_ready"
+complete_text = """
+    The ship pings: all artifacts secured. Launch systems ready.
+    """
+room_text = "Your explorer ship squats here, ramp down, storage bay open."
+examine_text = "Scuffed hull, sturdy cargo bay. This is your way off Aurora."
+
+[[item]]
+id = "stardust_pearl"
+name = "stardust pearl|pearl"
+aliases = ["legendary pearl"]
+start_location = "room:crystal_grove"
+room_text = "A shimmering stardust pearl rests in a cradle of crystal roots."
+inventory_text = "a stardust pearl"
+examine_text = "The pearl glitters with inner starlight."
+
+[[item]]
+id = "gravity_core"
+name = "gravity core|core"
+aliases = ["legendary core"]
+start_location = "room:temple"
+room_text = "A floating gravity core pulses above the altar."
+inventory_text = "a gravity core"
+examine_text = "A dense sphere that bends the light around it."
+
+[[item]]
+id = "ancient_tablet"
+name = "ancient tablet|tablet"
+aliases = ["legendary tablet"]
+start_location = "room:wreck"
+room_text = "An ancient tablet lies half-buried in ash."
+inventory_text = "an ancient tablet"
+examine_text = "Etched with alien script and humming faintly."
+
+[[item]]
+id = "trade_token"
+name = "trade token|token"
+start_location = "room:wreck"
+room_text = "A gleaming token marked with alien sigils."
+inventory_text = "a trade token"
+examine_text = "Likely valuable to the alien sentinel."
+
+[[npc]]
+id = "sentinel"
+name = "alien sentinel|sentinel|alien"
+start_room = "canyon"
+room_text = "An alien sentinel blocks the narrow path east."
+examine_text = "Tall, armored in chitin, and unimpressed by you."
+block_movement = true
+block_exits = ["east"]
+block_text = "The sentinel bars your way with a spear."
+block_conditions = ["!sentinel_bribed"]
+
+  [[npc.action]]
+  id = "bribe_sentinel"
+  verbs = ["give", "offer", "trade"]
+  nouns = ["token", "trade"]
+  requires_inventory = ["trade_token"]
+  response = "You offer the trade token. The sentinel nods, pockets it, and steps aside."
+  effects = ["sentinel_bribed"]
+
+  [[npc.dialogue]]
+  id = "sentinel_demand"
+  conditions = ["!sentinel_bribed"]
+  response = "\"Token for passage,\" the sentinel rasps."
+
+  [[npc.dialogue]]
+  id = "sentinel_allow"
+  conditions = ["sentinel_bribed"]
+  response = "\"Go.\" The sentinel gestures east."

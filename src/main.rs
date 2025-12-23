@@ -42,7 +42,7 @@ fn main() -> io::Result<()> {
     let world_path: PathBuf = env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("public/domus.toml"));
+        .unwrap_or_else(|| PathBuf::from("public/default.toml"));
 
     let world = match load_world_from_file(&world_path) {
         Ok(w) => {
