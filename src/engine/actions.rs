@@ -10,7 +10,6 @@ enum ActionBlockReason {
     MissingInventory,
     MissingScope,
     BlockedByConditions,
-    Ambiguous,
 }
 
 fn tokenize(input: &str) -> Vec<String> {
@@ -351,7 +350,6 @@ pub(crate) fn evaluate_actions_for_input<'a>(
                 ActionBlockReason::MissingInventory => 3,
                 ActionBlockReason::MissingScope => 2,
                 ActionBlockReason::BlockedByConditions => 1,
-                ActionBlockReason::Ambiguous => 0,
             };
 
             let candidate = (total_score * 10 + reason_rank, reason, msg);

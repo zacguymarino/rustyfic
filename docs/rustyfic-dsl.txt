@@ -228,6 +228,9 @@ Required fields:
     "npc:<npc_id>"  (item starts carried by an NPC)
 
 Optional fields:
+- aliases (array of strings)
+  Additional names/synonyms for this item.
+
 - portable (boolean, default true)
   Whether the item can be carried.
 
@@ -340,6 +343,9 @@ Optional fields:
 
 - conditions (array of strings)
   Flags that control whether the NPC is visible or interactable.
+
+- aliases (array of strings)
+  Additional names/synonyms for this NPC.
 
 - roam_enabled (boolean)
   If true, the NPC may relocate after player movement.

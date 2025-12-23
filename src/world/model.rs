@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 /// Runtime world type used by the game loop.
 pub struct World {
+    #[allow(dead_code)]
     pub id: String,
     pub name: String,
     pub desc: String,
@@ -39,6 +40,7 @@ pub struct Exit {
 }
 
 pub struct Action {
+    #[allow(dead_code)]
     pub id: String,
     pub verbs: Vec<String>,
     pub nouns: Vec<String>,

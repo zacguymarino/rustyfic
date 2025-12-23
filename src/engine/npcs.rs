@@ -10,7 +10,7 @@ use crate::world::ItemLocation;
 pub enum NpcMatch<'a> {
     None,
     One(&'a world::Npc),
-    Many(Vec<&'a world::Npc>),
+    Many(()),
 }
 
 fn tokenize(input: &str) -> Vec<String> {
@@ -98,7 +98,7 @@ pub(crate) fn find_npc_by_words_scored<'a>(
         1 => NpcMatch::One(best[0]),
         _ => {
             best.sort_by(|a, b| a.name.cmp(&b.name));
-            NpcMatch::Many(best)
+            NpcMatch::Many(())
         }
     }
 }

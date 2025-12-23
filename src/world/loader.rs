@@ -104,6 +104,8 @@ struct ActionConfig {
 struct ItemConfig {
     id: String,
     name: String,
+    #[serde(default)]
+    aliases: Vec<String>,
 
     /// Where the item starts: "room:house", "inventory", "item:trophy_case", etc.
     start_location: String,
@@ -179,6 +181,8 @@ struct GlobalConditionConfig {
 struct NpcConfig {
     id: String,
     name: String,
+    #[serde(default)]
+    aliases: Vec<String>,
     start_room: String,
 
     #[serde(default)]
@@ -361,7 +365,13 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
         let start_location = parse_item_location(&ic.start_location)
             .map_err(|msg| io::Error::new(io::ErrorKind::InvalidData, msg))?;
 
-        let (primary_name, aliases) = parse_name_and_aliases(&ic.name);
+        let (primary_name, mut aliases) = parse_name_and_aliases(&ic.name);
+        for extra in &ic.aliases {
+            let trimmed = extra.trim();
+            if !trimmed.is_empty() {
+                aliases.push(trimmed.to_string());
+            }
+        }
         if primary_name.trim().is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -429,7 +439,13 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
             ));
         }
 
-        let (primary_name, aliases) = parse_name_and_aliases(&nc.name);
+        let (primary_name, mut aliases) = parse_name_and_aliases(&nc.name);
+        for extra in &nc.aliases {
+            let trimmed = extra.trim();
+            if !trimmed.is_empty() {
+                aliases.push(trimmed.to_string());
+            }
+        }
         if primary_name.trim().is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

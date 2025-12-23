@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::engine::actions::evaluate_actions_for_input;
 use crate::engine::conditions::conditions_met;
 use crate::engine::output::Output;
 use crate::world;
@@ -10,7 +9,7 @@ use crate::engine::npcs::{NpcMatch, find_npc_by_words_scored, try_handle_examine
 enum ItemMatch<'a> {
     None,
     One(&'a world::Item),
-    Many(Vec<&'a world::Item>),
+    Many(()),
 }
 
 /// Find the *best* matching item by counting full-word overlaps.
@@ -114,7 +113,7 @@ where
         _ => {
             // Optional: sort to make stable
             best.sort_by(|a, b| a.name.cmp(&b.name));
-            ItemMatch::Many(best)
+            ItemMatch::Many(())
         }
     }
 }
