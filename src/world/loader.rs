@@ -8,6 +8,7 @@ use super::model::{
     Action, ContainerProps, Exit, GlobalCondition, Item, ItemKind, ItemLocation, Room, StateDesc,
     World,
 };
+use super::validate_world;
 
 ////////////////////
 /// TOML STRUCTS ///
@@ -267,20 +268,6 @@ pub fn load_world_from_file(path: &Path) -> io::Result<World> {
 pub fn load_world_from_str(contents: &str) -> io::Result<World> {
     let world_file: WorldFile = toml::from_str(&contents)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-
-    // Basic validation
-    if world_file.world.id.trim().is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "world.id may not be empty",
-        ));
-    }
-    if world_file.world.start_room.trim().is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "world.start_room may not be empty",
-        ));
-    }
 
     // Build rooms map
     let mut rooms_map: HashMap<String, Room> = HashMap::new();
@@ -572,7 +559,7 @@ pub fn load_world_from_str(contents: &str) -> io::Result<World> {
         })
         .collect();
 
-    Ok(World {
+    let world = World {
         id: world_file.world.id,
         name: world_file.world.name,
         desc: normalize_multiline_desc(&world_file.world.desc),
@@ -582,7 +569,19 @@ pub fn load_world_from_str(contents: &str) -> io::Result<World> {
         npcs: npcs_map,
         global_conditions,
         global_actions,
-    })
+    };
+
+    let validation_errors = validate_world(&world);
+    if !validation_errors.is_empty() {
+        let msgs = validation_errors
+            .into_iter()
+            .map(|e| e.message)
+            .collect::<Vec<String>>()
+            .join("\n");
+        return Err(io::Error::new(io::ErrorKind::InvalidData, msgs));
+    }
+
+    Ok(world)
 }
 
 fn normalize_multiline_desc(raw: &str) -> String {
